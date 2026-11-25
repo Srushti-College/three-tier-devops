@@ -3,7 +3,7 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_USERNAME = 'YOUR_DOCKERHUB_USERNAME'
+        DOCKERHUB_USERNAME = 'srushti22'
 
         BACKEND_IMAGE = "${DOCKERHUB_USERNAME}/employee-backend"
         FRONTEND_IMAGE = "${DOCKERHUB_USERNAME}/employee-frontend"
@@ -16,6 +16,27 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+            }
+        }
+
+        stage('Check Tools') {
+            steps {
+                sh '''
+                    echo "===== Node ====="
+                    node --version
+
+                    echo "===== NPM ====="
+                    npm --version
+
+                    echo "===== Docker ====="
+                    docker --version
+
+                    echo "===== Kubectl ====="
+                    kubectl version --client
+
+                    echo "===== Git ====="
+                    git --version
+                '''
             }
         }
 
@@ -47,7 +68,6 @@ pipeline {
 
                 sh """
                     docker build \
-                    --build-arg VITE_API_URL=http://192.168.49.2:30050 \
                     -t ${FRONTEND_IMAGE}:${IMAGE_TAG} \
                     ./frontend
                 """
@@ -56,6 +76,7 @@ pipeline {
 
         stage('Docker Login') {
             steps {
+
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'dockerhub-credentials',
@@ -90,11 +111,11 @@ pipeline {
             steps {
 
                 sh """
-                    sed -i 's|YOUR_DOCKERHUB_USERNAME/employee-backend:1.0|${BACKEND_IMAGE}:${IMAGE_TAG}|g' k8s/three-tier.yaml
+                    sed -i -E 's|(image: srushti22/employee-backend:).*|\\1${IMAGE_TAG}|' k8s/three-tier.yaml
                 """
 
                 sh """
-                    sed -i 's|YOUR_DOCKERHUB_USERNAME/employee-frontend:1.0|${FRONTEND_IMAGE}:${IMAGE_TAG}|g' k8s/three-tier.yaml
+                    sed -i -E 's|(image: srushti22/employee-frontend:).*|\\1${IMAGE_TAG}|' k8s/three-tier.yaml
                 """
 
                 sh """
@@ -103,14 +124,46 @@ pipeline {
             }
         }
 
+        stage('Wait for Rollout') {
+            steps {
+
+                sh '''
+                    kubectl rollout status deployment/backend -n three-tier
+                    kubectl rollout status deployment/frontend -n three-tier
+                    kubectl rollout status deployment/postgres -n three-tier
+                '''
+            }
+        }
+
         stage('Verify Deployment') {
             steps {
 
                 sh '''
+                    echo "===== PODS ====="
                     kubectl get pods -n three-tier
+
+                    echo "===== SERVICES ====="
                     kubectl get services -n three-tier
+
+                    echo "===== DEPLOYMENTS ====="
+                    kubectl get deployments -n three-tier
                 '''
             }
+        }
+    }
+
+    post {
+
+        success {
+            echo 'CI/CD pipeline completed successfully!'
+        }
+
+        failure {
+            echo 'Pipeline failed. Check the failed stage logs.'
+        }
+
+        always {
+            sh 'docker logout || true'
         }
     }
 }
